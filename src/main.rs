@@ -152,9 +152,19 @@ impl PieceType {
                 | (positions << 6) & (u64::MAX ^ (File::H.to_u64() | File::G.to_u64()))
                 | (positions >> 10) & (u64::MAX ^ (File::H.to_u64() | File::G.to_u64()))
                 | (positions >> 17) & (u64::MAX ^ File::H.to_u64())
-            }
+            },
+            PieceType::Pawn => 0, //don't use this fn for pawns
             _ => 0
         }
+    }
+
+    fn pawn_attacks(positions: u64, player: Player) -> u64 {
+        if player == Player::White {
+            return (positions << 7) & (u64::MAX ^ File::H.to_u64())
+            | (positions << 9) & (u64::MAX ^ File::A.to_u64())
+        } 
+        (positions >> 9) & (u64::MAX ^ File::H.to_u64())
+        | (positions >> 7) & (u64::MAX ^ File::A.to_u64())
     }
 }
 
@@ -318,8 +328,19 @@ impl BitBoardPosition {
                 let intersection = PieceType::Knight.x_ray_attacks(tentative_move.start.to_u64()) & tentative_move.end.to_u64();
                 if intersection != 0 { return Ok(()); }
                 Err("Illegal knight move".to_string())
+            },
+            PieceType::Pawn => {
+                let intersection = PieceType::pawn_attacks(tentative_move.start.to_u64(), tentative_move.piece.owner) & tentative_move.end.to_u64();
+                if intersection == 0 { return Err("Illegal pawn move".to_string()); }
+
+                for piece_type_determinant in 0..6 {
+                    if (self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] & tentative_move.end.to_u64()) != 0 {
+                        return Ok(());
+                    }
+                }            
+                Err("Diagonal pawn moves need to be a capture".to_string())
             }
-            default => Err("Not implemented".to_string())
+            _ => Err("Not implemented".to_string())
         }
     }
 
