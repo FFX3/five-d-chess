@@ -1,4 +1,6 @@
 use num_enum::TryFromPrimitive;
+use self::calculations::intercect_with_player_pieces;
+
 use super::{
     Square, 
     Piece, 
@@ -9,6 +11,7 @@ use super::{
     definitions:: {
         Move, 
         File,
+        Rank,
     }
 };
 
@@ -70,15 +73,26 @@ impl BitBoardPosition {
                 Err("Illegal knight move".to_string())
             },
             PieceType::Pawn => {
-                let intersection = calculations::pawn_attacks(tentative_move.start.to_u64(), tentative_move.piece.owner) & tentative_move.end.to_u64();
-                if intersection == 0 { return Err("Illegal pawn move".to_string()); }
+                let start = tentative_move.start.to_u64();
+                let end = tentative_move.end.to_u64();
+                let owner = tentative_move.piece.owner;
 
-                for piece_type_determinant in 0..6 {
-                    if (self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] & tentative_move.end.to_u64()) != 0 {
+                if (calculations::pawn_attacks(start, owner) & end) != 0 {
+                    if intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play.opponent()) {
                         return Ok(());
                     }
-                }            
-                Err("Diagonal pawn moves need to be a capture".to_string())
+                    return Err("Diagonal pawn moves need to be a capture".to_string())
+                }
+                
+                if (calculations::pawn_moves(start, owner) & end) != 0 {
+                    if !intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play.opponent()) 
+                        && !intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play) {
+                        return Ok(());
+                    }
+                    return Err("Pawn cannot attack forward".to_string())
+                }
+
+                Err("Illegal pawn move".to_string())
             }
             _ => Err("Not implemented".to_string())
         }
@@ -193,10 +207,27 @@ impl File {
         (0..8).into_iter().fold(0, |acc, row_numer| -> u64 { acc + 2u64.pow((row_numer * 8) + self.to_owned() as u32) })
     }
 }
+impl Rank {
+    fn to_u64(&self) -> u64 {
+        let descriminant = self.to_owned() as u32;
+        (0..8).into_iter().fold(0, |acc, colum_number| -> u64 { acc + 2u64.pow((colum_number) + descriminant) }) << (descriminant * 7) //TODO: why 7? it works?
+    }
+}
 
 
 mod calculations {
-    use super::{ File, Player };
+    use crate::definitions::Rank;
+
+    use super::{ File, Player, BitBoardPosition };
+
+    pub fn intercect_with_player_pieces(map: u64, position: &BitBoardPosition, player: Player) -> bool {
+        for piece_type_determinant in 0..6 {
+            if (position.board[piece_type_determinant + (6 * player as usize)] & map) != 0 {
+                return true;
+            }
+        }            
+        false
+    }
 
     pub fn knight_attacks(positions: u64) -> u64 {
         (positions << 17) & (u64::MAX ^ File::A.to_u64())
@@ -216,5 +247,22 @@ mod calculations {
         } 
         (positions >> 9) & (u64::MAX ^ File::H.to_u64())
         | (positions >> 7) & (u64::MAX ^ File::A.to_u64())
+    }
+
+    pub fn pawn_moves(positions: u64, player: Player) -> u64 {
+        let unmoved_pawns: u64;
+        let no_last_rank: u64;
+
+        if player == Player::White {
+            no_last_rank = positions & ( u64::MAX ^ Rank::Eight as u64 );
+            unmoved_pawns = no_last_rank & Rank::Second.to_u64();
+            return (unmoved_pawns << 16 ) | (no_last_rank << 8);
+        }
+        no_last_rank = positions & ( u64::MAX ^ Rank::First as u64 );
+        print!("{}\n",super::BitBoard(Rank::First.to_u64()).to_string());
+        print!("{}\n",super::BitBoard(Rank::Second.to_u64()).to_string());
+        print!("{}\n",super::BitBoard(Rank::Seventh.to_u64()).to_string());
+        unmoved_pawns = no_last_rank & Rank::Seventh.to_u64();
+        (unmoved_pawns >> 16 ) | (no_last_rank >> 8)
     }
 }
