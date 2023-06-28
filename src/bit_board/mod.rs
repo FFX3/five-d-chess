@@ -259,9 +259,6 @@ mod calculations {
             return (unmoved_pawns << 16 ) | (no_last_rank << 8);
         }
         no_last_rank = positions & ( u64::MAX ^ Rank::First as u64 );
-        print!("{}\n",super::BitBoard(Rank::First.to_u64()).to_string());
-        print!("{}\n",super::BitBoard(Rank::Second.to_u64()).to_string());
-        print!("{}\n",super::BitBoard(Rank::Seventh.to_u64()).to_string());
         unmoved_pawns = no_last_rank & Rank::Seventh.to_u64();
         (unmoved_pawns >> 16 ) | (no_last_rank >> 8)
     }
