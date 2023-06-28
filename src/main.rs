@@ -1,13 +1,236 @@
-use std::default;
 use std::str::FromStr;
 use std::result::Result;
 
 use num_enum::TryFromPrimitive;
 
+
+mod bit_board {
+    use num_enum::TryFromPrimitive;
+    use super::{
+        Square, 
+        Piece, 
+        PieceType, 
+        SimplePosition, 
+        Player, 
+        Occupant, 
+        Move, 
+        ToPlay, 
+        File
+    };
+
+    impl Square {
+        pub fn to_u64(&self) -> u64 {
+            2u64.pow(self.to_owned() as u32)
+        }
+    }
+
+    impl BitBoardPosition {
+        pub fn play_move(mut self, tentative_move: (Square, Square)) -> Result<Self, Self> {
+            let tentative_move_result = Move::from_bitboard(&self, tentative_move);
+
+            if let Err(err) = tentative_move_result {
+                println!("{}\n\n", err);
+                return Err(self);
+            }
+
+            let detailed_move = tentative_move_result.unwrap();
+
+            if let Err(err) = self.validate_move(&detailed_move) {
+                println!("{}\n\n", err);
+                return Err(self);
+            }
+
+            self.board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] += detailed_move.end.to_u64();
+            self.board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] -= detailed_move.start.to_u64();
+
+            for piece_type_determinant in 0..6 {
+                let mut layer = self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
+
+                layer = layer - (layer & detailed_move.end.to_u64());
+
+                if (layer & detailed_move.end.to_u64()) != 0 {
+                    println!("Piece captured!");
+                }
+
+                self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
+            }
+
+            self.to_play = self.to_play.opponent();
+
+            Ok(self)
+        }
+
+        fn validate_move(&self, tentative_move: &Move) -> Result<(), String> {
+            if self.to_play != tentative_move.piece.owner { return Err("Player doesn't own this piece".to_string()); }
+
+            for piece_type_determinant in 0..6 {
+                if (self.board[piece_type_determinant + (6 * self.to_play as usize)] & tentative_move.end.to_u64()) != 0 {
+                    return Err("Player already has a piece occupying the end square".to_string());
+                }
+            }            
+
+            match tentative_move.piece.piece_type {
+                PieceType::Knight => {
+                    let intersection = calculations::knight_attacks(tentative_move.start.to_u64()) & tentative_move.end.to_u64();
+                    if intersection != 0 { return Ok(()); }
+                    Err("Illegal knight move".to_string())
+                },
+                PieceType::Pawn => {
+                    let intersection = calculations::pawn_attacks(tentative_move.start.to_u64(), tentative_move.piece.owner) & tentative_move.end.to_u64();
+                    if intersection == 0 { return Err("Illegal pawn move".to_string()); }
+
+                    for piece_type_determinant in 0..6 {
+                        if (self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] & tentative_move.end.to_u64()) != 0 {
+                            return Ok(());
+                        }
+                    }            
+                    Err("Diagonal pawn moves need to be a capture".to_string())
+                }
+                _ => Err("Not implemented".to_string())
+            }
+        }
+
+        pub fn from_position(position: &SimplePosition) -> Self {
+            const PIECE_TYPE_COUNT: usize = 6;
+
+            let mut board: [u64; PIECE_TYPE_COUNT * 2] = [0; PIECE_TYPE_COUNT * 2];
+
+            for (square_index, occupant) in position.board.iter().enumerate() {
+                let piece_result = occupant.piece();
+                if piece_result.is_none() { continue; }
+                let piece = piece_result.unwrap();
+                let bit_board_layer = match piece.owner {
+                    Player::White => (piece.piece_type as usize) + (PIECE_TYPE_COUNT * Player::White as usize),
+                    Player::Black => (piece.piece_type as usize) + (PIECE_TYPE_COUNT * Player::Black as usize),
+                };
+                board[bit_board_layer] += (2 as u64).pow(square_index as u32);
+            }
+
+            Self {
+                to_play: position.to_play, 
+                board,
+            }
+        }
+
+        pub fn to_position(&self) -> SimplePosition {
+            let mut board = [Occupant::None; 64];
+            const PIECE_TYPE_COUNT: u8 = 6;
+
+            for (i, layer) in self.board.iter().enumerate() {
+                for square_index in 0..64 {
+                    let intersection_check = (2 as u64).pow(square_index as u32);
+                    if (layer & intersection_check) == intersection_check {
+                        let player = if i < 6 { Player::White } else { Player::Black };
+                        board[square_index] = Occupant::Piece(Piece {
+                            owner: player,
+                            piece_type: PieceType::try_from(i as u8 - (PIECE_TYPE_COUNT * player as u8)).unwrap()
+                        })
+                    }
+                }
+            }
+
+            SimplePosition {
+                to_play: self.to_play,
+                board,
+            }
+        }
+
+        #[allow(dead_code)]
+        fn to_string(&self) -> String {
+            const PIECE_TYPE_COUNT: u8 = 6;
+            let mut result_string = String::new();
+            for (i, layer) in self.board.iter().enumerate() {
+                let player = if i < 6 { Player::White } else { Player::Black };
+                result_string.push_str(&format!("{:?} {:?}\n\n", player, PieceType::try_from(i as u8 - (PIECE_TYPE_COUNT * player as u8)).unwrap()));
+
+                result_string.push_str(&BitBoard(layer.to_owned()).to_string());
+                result_string.push_str("\n\n");
+            }
+            result_string
+        }
+    }
+
+    struct BitBoard(u64);
+
+    impl BitBoard {
+        fn to_string(&self) -> String {
+            let mut result_string = String::new();
+            for square_index in 0..64 {
+                let intersection_check = (2 as u64).pow(square_index as u32);
+                result_string.push_str(if (self.0 & intersection_check) == intersection_check { "1" } else { "." });
+                if (square_index+1) % 8 == 0 {
+                    result_string.push_str("\n");
+                }
+            }
+            result_string
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct BitBoardPosition {
+        to_play: ToPlay,
+        board: [u64; 12], //indexes with piece type enum
+    }
+
+    impl Move {
+        fn from_bitboard(position: &BitBoardPosition, squares: (Square, Square)) -> Result<Self, &str> {
+
+            let start_square = squares.0;
+            let end_square = squares.1;
+
+            for piece_type_determinant in 0..6 {
+                if (position.board[piece_type_determinant + (6 * position.to_play as usize)] & start_square.to_u64()) != 0 {
+                    return Ok(Move {
+                        start: start_square,
+                        end: end_square,
+                        piece: Piece {
+                            owner: position.to_play,
+                            piece_type: PieceType::try_from_primitive(piece_type_determinant as u8).unwrap(),
+                        }
+                    })
+                }
+            }
+            Err("Square is empty")
+        }
+    }
+
+    impl File {
+        fn to_u64(&self) -> u64 {
+            (0..8).into_iter().fold(0, |acc, row_numer| -> u64 { acc + 2u64.pow((row_numer * 8) + self.to_owned() as u32) })
+        }
+    }
+
+
+    mod calculations {
+        use super::{ File, Player };
+
+        pub fn knight_attacks(positions: u64) -> u64 {
+            (positions << 17) & (u64::MAX ^ File::A.to_u64())
+            | (positions << 10) & (u64::MAX ^ (File::A.to_u64() | File::B.to_u64()))
+            | (positions >> 6) & (u64::MAX ^ (File::A.to_u64() | File::B.to_u64()))
+            | (positions >> 15) & (u64::MAX ^ File::A.to_u64())
+            | (positions << 15) & (u64::MAX ^ File::H.to_u64())
+            | (positions << 6) & (u64::MAX ^ (File::H.to_u64() | File::G.to_u64()))
+            | (positions >> 10) & (u64::MAX ^ (File::H.to_u64() | File::G.to_u64()))
+            | (positions >> 17) & (u64::MAX ^ File::H.to_u64())
+        }
+
+        pub fn pawn_attacks(positions: u64, player: Player) -> u64 {
+            if player == Player::White {
+                return (positions << 7) & (u64::MAX ^ File::H.to_u64())
+                | (positions << 9) & (u64::MAX ^ File::A.to_u64())
+            } 
+            (positions >> 9) & (u64::MAX ^ File::H.to_u64())
+            | (positions >> 7) & (u64::MAX ^ File::A.to_u64())
+        }
+    }
+}
+
 fn main() {
     use std::env;
+    use bit_board::BitBoardPosition;
     env::set_var("RUST_BACKTRACE", "1");
-    let initial_position: Position = Position {
+    let initial_position: SimplePosition = SimplePosition {
         to_play: Player::White,
         board: [
             [
@@ -59,30 +282,20 @@ fn main() {
         let start_square = Square::from_str(square_iter.next().unwrap()).expect("invalid start square");
         let end_square = Square::from_str(square_iter.next().unwrap()).expect("invalid end square");
 
+        let move_instruction = (start_square, end_square);
 
-        let tentative_move_result = Move::from_squares((start_square, end_square), &position);
-
-        if let Err(err) = tentative_move_result {
-            println!("{}", err);
-            continue;
+        position = match position.play_move(move_instruction) {
+            Ok(_position) => _position,
+            Err(_position) => { 
+                println!("Illegal Move");
+                _position
+            }
         }
-
-        let tentative_move = tentative_move_result.unwrap();
-
-        let move_result = position.play_move(&tentative_move);
-
-        if let Err(_position) = move_result {
-            println!("Illegal Move!");
-            position = _position;
-            continue;
-        }
-        position = move_result.unwrap()
-
     }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-enum Square {
+pub enum Square {
    A1,B1,C1,D1,E1,F1,G1,H1,
    A2,B2,C2,D2,E2,F2,G2,H2,
    A3,B3,C3,D3,E3,F3,G3,H3,
@@ -94,22 +307,11 @@ enum Square {
 
 }
 
-impl Square {
-    fn to_u64(&self) -> u64 {
-        2u64.pow(self.to_owned() as u32)
-    }
-}
-
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+#[allow(dead_code)]
 enum File {
     A,B,C,D,E,F,G,H
-}
-
-impl File {
-    fn to_u64(&self) -> u64 {
-        (0..8).into_iter().fold(0, |acc, row_numer| -> u64 { acc + 2u64.pow((row_numer * 8) + self.to_owned() as u32) })
-    }
 }
 
 impl FromStr for Square {
@@ -141,31 +343,7 @@ enum PieceType {
 }
 
 impl PieceType {
-    fn x_ray_attacks(&self, positions: u64) -> u64 {
-        match self {
-            PieceType::Knight => {
-                (positions << 17) & (u64::MAX ^ File::A.to_u64())
-                | (positions << 10) & (u64::MAX ^ (File::A.to_u64() | File::B.to_u64()))
-                | (positions >> 6) & (u64::MAX ^ (File::A.to_u64() | File::B.to_u64()))
-                | (positions >> 15) & (u64::MAX ^ File::A.to_u64())
-                | (positions << 15) & (u64::MAX ^ File::H.to_u64())
-                | (positions << 6) & (u64::MAX ^ (File::H.to_u64() | File::G.to_u64()))
-                | (positions >> 10) & (u64::MAX ^ (File::H.to_u64() | File::G.to_u64()))
-                | (positions >> 17) & (u64::MAX ^ File::H.to_u64())
-            },
-            PieceType::Pawn => 0, //don't use this fn for pawns
-            _ => 0
-        }
-    }
 
-    fn pawn_attacks(positions: u64, player: Player) -> u64 {
-        if player == Player::White {
-            return (positions << 7) & (u64::MAX ^ File::H.to_u64())
-            | (positions << 9) & (u64::MAX ^ File::A.to_u64())
-        } 
-        (positions >> 9) & (u64::MAX ^ File::H.to_u64())
-        | (positions >> 7) & (u64::MAX ^ File::A.to_u64())
-    }
 }
 
 
@@ -213,18 +391,11 @@ impl Occupant {
             Self::None => None,
         }
     }
-
-    fn is_some(self) -> bool {
-        match self {
-            Self::Piece(_) => true,
-            Self::None => false,
-        }
-    }
 }
 
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-enum Player {
+pub enum Player {
     White,
     Black,
 }
@@ -241,169 +412,12 @@ impl Player {
 type ToPlay = Player;
 
 #[derive(Debug)]
-struct Position {
+pub struct SimplePosition {
     board: [Occupant; 64],
     to_play: ToPlay,
 }
 
-impl Position {
-    fn play_move(mut self, tentative_move: &Move) -> Result<Self, Self> {
-        if let Err(err) = BitBoardPosition::from_position(&self).validate_move(tentative_move) {
-            println!("{}", err);
-            return Err(self);
-        }
-
-        self.board[tentative_move.start as usize] = Occupant::None;
-        self.board[tentative_move.end as usize] = Occupant::Piece(tentative_move.piece);
-
-        self.to_play = match self.to_play {
-            Player::White => Player::Black,
-            Player::Black => Player::White,
-        };
-
-        Ok(self)
-    }
-}
-
-struct BitBoard(u64);
-
-impl BitBoard {
-    fn to_string(&self) -> String {
-        let mut result_string = String::new();
-        for square_index in 0..64 {
-            let intersection_check = (2 as u64).pow(square_index as u32);
-            result_string.push_str(if (self.0 & intersection_check) == intersection_check { "1" } else { "." });
-            if (square_index+1) % 8 == 0 {
-                result_string.push_str("\n");
-            }
-        }
-        result_string
-    }
-}
-
-#[derive(Debug)]
-struct BitBoardPosition {
-    to_play: ToPlay,
-    board: [u64; 12], //indexes with piece type enum
-}
-
-impl BitBoardPosition {
-    fn play_move(mut self, move_played: &Move) -> Result<Self, Self> {
-        if let Err(err) = self.validate_move(move_played) {
-            println!("{}\n\n", err);
-            return Err(self);
-        }
-
-        self.board[move_played.piece.piece_type as usize + (6 * self.to_play as usize)] += move_played.end.to_u64();
-        self.board[move_played.piece.piece_type as usize + (6 * self.to_play as usize)] -= move_played.start.to_u64();
-
-        for piece_type_determinant in 0..6 {
-            let mut layer = self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
-                
-            layer = layer - (layer & move_played.end.to_u64());
-
-            if (layer & move_played.end.to_u64()) != 0 {
-                println!("Piece captured!");
-            }
-
-            self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
-        }
-
-        self.to_play = self.to_play.opponent();
-
-        Ok(self)
-    }
-
-    fn validate_move(&self, tentative_move: &Move) -> Result<(), String> {
-        if self.to_play != tentative_move.piece.owner { return Err("Player doesn't own this piece".to_string()); }
-
-        for piece_type_determinant in 0..6 {
-            if (self.board[piece_type_determinant + (6 * self.to_play as usize)] & tentative_move.end.to_u64()) != 0 {
-                return Err("Player already has a piece occupying the end square".to_string());
-            }
-        }            
-
-        match tentative_move.piece.piece_type {
-            PieceType::Knight => {
-                let intersection = PieceType::Knight.x_ray_attacks(tentative_move.start.to_u64()) & tentative_move.end.to_u64();
-                if intersection != 0 { return Ok(()); }
-                Err("Illegal knight move".to_string())
-            },
-            PieceType::Pawn => {
-                let intersection = PieceType::pawn_attacks(tentative_move.start.to_u64(), tentative_move.piece.owner) & tentative_move.end.to_u64();
-                if intersection == 0 { return Err("Illegal pawn move".to_string()); }
-
-                for piece_type_determinant in 0..6 {
-                    if (self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] & tentative_move.end.to_u64()) != 0 {
-                        return Ok(());
-                    }
-                }            
-                Err("Diagonal pawn moves need to be a capture".to_string())
-            }
-            _ => Err("Not implemented".to_string())
-        }
-    }
-
-    fn from_position(position: &Position) -> Self {
-        const PIECE_TYPE_COUNT: usize = 6;
-
-        let mut board: [u64; PIECE_TYPE_COUNT * 2] = [0; PIECE_TYPE_COUNT * 2];
-
-        for (square_index, occupant) in position.board.iter().enumerate() {
-            let piece_result = occupant.piece();
-            if piece_result.is_none() { continue; }
-            let piece = piece_result.unwrap();
-            let bit_board_layer = match piece.owner {
-                Player::White => (piece.piece_type as usize) + (PIECE_TYPE_COUNT * Player::White as usize),
-                Player::Black => (piece.piece_type as usize) + (PIECE_TYPE_COUNT * Player::Black as usize),
-            };
-            board[bit_board_layer] += (2 as u64).pow(square_index as u32);
-        }
-
-        Self {
-            to_play: position.to_play, 
-            board,
-        }
-    }
-
-    fn to_position(&self) -> Position {
-        let mut board = [Occupant::None; 64];
-        const PIECE_TYPE_COUNT: u8 = 6;
-        
-        for (i, layer) in self.board.iter().enumerate() {
-            for square_index in 0..64 {
-                let intersection_check = (2 as u64).pow(square_index as u32);
-                if (layer & intersection_check) == intersection_check {
-                    let player = if i < 6 { Player::White } else { Player::Black };
-                    board[square_index] = Occupant::Piece(Piece {
-                        owner: player,
-                        piece_type: PieceType::try_from(i as u8 - (PIECE_TYPE_COUNT * player as u8)).unwrap()
-                    })
-                }
-            }
-        }
-
-        Position {
-            to_play: self.to_play,
-            board,
-        }
-    }
-
-    fn to_string(&self) -> String {
-        const PIECE_TYPE_COUNT: u8 = 6;
-        let mut result_string = String::new();
-        for (i, layer) in self.board.iter().enumerate() {
-            let player = if i < 6 { Player::White } else { Player::Black };
-            result_string.push_str(&format!("{:?} {:?}\n\n", player, PieceType::try_from(i as u8 - (PIECE_TYPE_COUNT * player as u8)).unwrap()));
-            
-            result_string.push_str(&BitBoard(layer.to_owned()).to_string());
-            result_string.push_str("\n\n");
-        }
-        result_string
-    }
-}
-
-impl ToString for Position {
+impl ToString for SimplePosition {
     fn to_string(&self) -> String {
         let mut result = String::new();
         let mut i = 0;
@@ -429,46 +443,7 @@ impl ToString for Position {
 }
 
 struct Move {
-    piece: Piece,
     start: Square,
     end: Square,
-}
-
-impl Move {
-    fn from_squares(squares: (Square, Square), position: &BitBoardPosition) -> Result<Self, &str> {
-
-        let start_square = squares.0;
-        let end_square = squares.1;
-
-        for piece_type_determinant in 0..6 {
-            if (position.board[piece_type_determinant + (6 * position.to_play as usize)] & start_square.to_u64()) != 0 {
-                return Ok(Move {
-                    start: start_square,
-                    end: end_square,
-                    piece: Piece {
-                        owner: position.to_play,
-                        piece_type: PieceType::try_from_primitive(piece_type_determinant as u8).unwrap()
-                    },
-                })
-            }
-        }
-        Err("Square is empty")
-
-        //let square_occupant = position.board[start_square as usize];
-        //if !square_occupant.is_some() {
-        //    return Err("Square is empty");
-        //}
-
-        //let piece_being_moved = square_occupant.piece().unwrap();
-
-        //if piece_being_moved.owner != position.to_play {
-        //    return Err("Player to move doesn't control this piece");
-        //}
-
-        //Ok(Move {
-        //    start: start_square,
-        //    end: end_square,
-        //    piece: piece_being_moved,
-        //})
-    }
+    piece: Piece,
 }
