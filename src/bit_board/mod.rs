@@ -16,8 +16,15 @@ use super::{
 };
 
 impl Square {
-    fn to_u64(&self) -> u64 {
+    pub fn to_u64(&self) -> u64 {
         2u64.pow(self.to_owned() as u32)
+    }
+
+    pub fn from_u64(d: u64) -> Square {
+        match Square::try_from_primitive((d as f64).log2() as u8) {
+            Ok(x) => x,
+            _ => Square::Invalid,
+        }
     }
 }
 
@@ -158,10 +165,10 @@ impl BitBoardPosition {
     }
 }
 
-struct BitBoard(u64);
+pub struct BitBoard(pub u64);
 
 impl BitBoard {
-    fn to_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         let mut result_string = String::new();
         for square_index in 0..64 {
             let intersection_check = (2 as u64).pow(square_index as u32);
@@ -207,6 +214,7 @@ impl File {
         (0..8).into_iter().fold(0, |acc, row_numer| -> u64 { acc + 2u64.pow((row_numer * 8) + self.to_owned() as u32) })
     }
 }
+
 impl Rank {
     fn to_u64(&self) -> u64 {
         let descriminant = self.to_owned() as u32;
@@ -215,7 +223,8 @@ impl Rank {
 }
 
 
-mod calculations {
+pub mod calculations {
+
     use crate::definitions::Rank;
 
     use super::{ File, Player, BitBoardPosition };
@@ -261,5 +270,223 @@ mod calculations {
         no_last_rank = positions & ( u64::MAX ^ Rank::First as u64 );
         unmoved_pawns = no_last_rank & Rank::Seventh.to_u64();
         (unmoved_pawns >> 16 ) | (no_last_rank >> 8)
+    }
+
+    pub mod precalculations {
+
+        use num_enum::TryFromPrimitive;
+
+        use crate::{bit_board::{ PieceType, Rank, File, BitBoard }, definitions::Square};
+
+        pub struct PreComputedAttackSets {
+            pub attacks: [[u64; 64]; 3],
+            pub blockers: [[u64; 64]; 3],
+            pub diagonals: [[[Square; 7]; 4]; 64],
+            pub orthogonals: [[[Square; 7]; 4]; 64],
+        }
+
+        impl PreComputedAttackSets {
+            pub fn attacks(&self, square: Square, piece: PieceType) -> u64 {
+                self.attacks[piece.precalculated_index()][square as usize]
+            }
+
+            pub fn blockers(&self, square: Square, piece: PieceType) -> u64 {
+                self.blockers[piece.precalculated_index()][square as usize]
+            }
+        }
+
+        impl PieceType {
+            fn precalculated_index(&self) -> usize {
+                match &self {
+                    PieceType::Rook => 0,
+                    PieceType::Bishop => 1,
+                    PieceType::Queen => 2,
+                    _ => panic!("These indexes don't exist")
+                }
+            }
+        }
+
+        pub fn build_piece_attack_set() -> PreComputedAttackSets {
+            let mut attacks = [[0 as u64; 64]; 3];
+            let mut blockers = [[0 as u64; 64]; 3];
+            let mut diagonals = [[[Square::Invalid; 7]; 4]; 64];
+            let mut orthogonals = [[[Square::Invalid; 7]; 4]; 64];
+            
+            {
+                for square_index in 0..64 {
+                    let current_square = Square::try_from_primitive(square_index as u8).unwrap();
+                    let mut attack_map = 0;
+
+                    {
+                        let edges = Rank::Eight.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square << 8;
+                                orthogonals[square_index][0][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+
+                    {
+                        let edges = File::H.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square << 1;
+                                orthogonals[square_index][1][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+                    {
+                        let edges = Rank::First.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square >> 8;
+                                orthogonals[square_index][2][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+
+                    {
+                        let edges = File::A.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square >> 1;
+                                orthogonals[square_index][3][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+                    attacks[PieceType::Rook.precalculated_index()][square_index as usize] = attack_map;
+                }
+            }
+
+            {
+                for square_index in 0..64 {
+                    let current_square = Square::try_from_primitive(square_index as u8).unwrap();
+                    let mut attack_map = 0;
+
+                    {
+                        let edges = File::H.to_u64() | Rank::Eight.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square << 9;
+                                diagonals[square_index][0][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+
+                    {
+                        let edges = File::H.to_u64() | Rank::First.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square >> 7;
+                                diagonals[square_index][1][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+                    {
+                        let edges = File::A.to_u64() | Rank::First.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square >> 9;
+                                diagonals[square_index][2][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+
+                    {
+                        let edges = File::A.to_u64() | Rank::Eight.to_u64();
+                        if current_square.to_u64() & edges == 0 {
+                            let mut new_square = current_square.to_u64();
+                            let mut count = 0;
+                            while new_square & edges == 0 {
+                                new_square = new_square << 7;
+                                diagonals[square_index][3][count] = Square::from_u64(new_square);
+                                count += 1;
+                                attack_map = attack_map | new_square;
+                            }
+                        }
+                    }
+
+                    attacks[PieceType::Bishop.precalculated_index()][square_index as usize] = attack_map;
+                }
+            }
+
+            {
+                for square_index in 0..64 {
+                    let mut non_blocker_map = 0;
+                    let current_square = Square::try_from_primitive(square_index as u8).unwrap();
+                    if current_square.to_u64() & File::A.to_u64() == 0 {
+                        non_blocker_map = non_blocker_map | File::A.to_u64();
+                    }
+                    if current_square.to_u64() & File::H.to_u64() == 0 {
+                        non_blocker_map = non_blocker_map | File::H.to_u64();
+                    }
+                    if current_square.to_u64() & Rank::First.to_u64() == 0 {
+                        non_blocker_map = non_blocker_map | Rank::First.to_u64();
+                    }
+                    if current_square.to_u64() & Rank::Eight.to_u64() == 0 {
+                        non_blocker_map = non_blocker_map | Rank::Eight.to_u64();
+                    }
+
+                    for precalculated_index in 0..3 {
+                        let attack_map = attacks[precalculated_index][square_index as usize];
+                        let blocker_map = attack_map - (attack_map & non_blocker_map);
+                        blockers[precalculated_index][square_index as usize] = blocker_map;
+                    }
+                }
+            }
+
+            {
+                for square_index in 0..64 {
+                    attacks[PieceType::Queen.precalculated_index()][square_index] 
+                        = attacks[PieceType::Rook.precalculated_index()][square_index] | attacks[PieceType::Bishop.precalculated_index()][square_index];
+                    blockers[PieceType::Queen.precalculated_index()][square_index] 
+                        = blockers[PieceType::Rook.precalculated_index()][square_index] | blockers[PieceType::Bishop.precalculated_index()][square_index];
+                }
+            }
+
+
+            PreComputedAttackSets{
+                attacks,
+                blockers,
+                diagonals,
+                orthogonals,
+            }
+        }
     }
 }

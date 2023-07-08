@@ -4,6 +4,7 @@ mod definitions;
 use std::str::FromStr;
 
 use bit_board::BitBoardPosition;
+use bit_board::calculations::precalculations;
 use definitions::{
     INITIAL_POSITION,
     SimplePosition,
@@ -18,6 +19,20 @@ fn main() {
     use std::env;
     env::set_var("RUST_BACKTRACE", "1");
 
+    let attack_sets = precalculations::build_piece_attack_set();
+
+    println!("{}", bit_board::BitBoard(attack_sets.attacks(Square::H4, PieceType::Bishop)).to_string());
+    println!("{}", bit_board::BitBoard(attack_sets.blockers(Square::H4, PieceType::Bishop)).to_string());
+
+    println!("{}", bit_board::BitBoard(attack_sets.attacks(Square::F3, PieceType::Queen)).to_string());
+    println!("{}", bit_board::BitBoard(attack_sets.blockers(Square::F3, PieceType::Queen)).to_string());
+
+    println!("{}", bit_board::BitBoard(attack_sets.attacks(Square::D2, PieceType::Rook)).to_string());
+    println!("{}", bit_board::BitBoard(attack_sets.blockers(Square::D2, PieceType::Rook)).to_string());
+
+}
+
+fn start_game() {
     let mut position = BitBoardPosition::from_position(&INITIAL_POSITION);
     use std::io::{stdin, stdout, Write};
     loop {
