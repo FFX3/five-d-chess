@@ -1,5 +1,5 @@
 use num_enum::TryFromPrimitive;
-use self::calculations::intercect_with_player_pieces;
+use self::calculations::{intercect_with_player_pieces, is_square_in_check, is_empty};
 
 use super::{
     Square, 
@@ -52,9 +52,55 @@ impl BitBoardPosition {
 
         let detailed_move = tentative_move_result.unwrap();
 
-        if let Err(err) = self.validate_move(&detailed_move, attack_sets) {
-            println!("{}\n\n", err);
-            return Err(self);
+        let mut is_valid_castle_move = false;
+
+        if detailed_move.piece.piece_type == PieceType::King {
+            if self.to_play == Player::White
+                && detailed_move.start == Square::E1 {
+                    match detailed_move.end {
+                        Square::G1 => {
+                            if self.white_king_side_castle
+                                && !is_square_in_check(Square::E1, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::F1, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::G1, &self.board, self.to_play, attack_sets)
+                                && is_empty(Square::E1.to_u64() & Square::F1.to_u64() & Square::G1.to_u64(), &self.board){
+                                    is_valid_castle_move = true;
+                            }
+                        },
+                        Square::C1 => {
+                            if self.white_queen_side_castle
+                                && !is_square_in_check(Square::E1, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::D1, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::C1, &self.board, self.to_play, attack_sets)
+                                && is_empty(Square::E1.to_u64() & Square::D1.to_u64() & Square::C1.to_u64(), &self.board){
+                                    is_valid_castle_move = true;
+                            }
+                        },
+                        _ => ()
+                    }
+                } else if detailed_move.start == Square::E8 {
+                    match detailed_move.end {
+                        Square::G8 => {
+                            if self.black_king_side_castle
+                                && !is_square_in_check(Square::E8, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::F8, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::G8, &self.board, self.to_play, attack_sets)
+                                && is_empty(Square::E8.to_u64() & Square::F8.to_u64() & Square::G8.to_u64(), &self.board){
+                                    is_valid_castle_move = true;
+                                }
+                        },
+                        Square::C8 => {
+                            if self.black_queen_side_castle
+                                && !is_square_in_check(Square::E8, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::D8, &self.board, self.to_play, attack_sets)
+                                && !is_square_in_check(Square::C8, &self.board, self.to_play, attack_sets)
+                                && is_empty(Square::E8.to_u64() & Square::D8.to_u64() & Square::C8.to_u64(), &self.board){
+                                    is_valid_castle_move = true;
+                                }
+                        },
+                        _ => ()
+                    }
+                }
         }
 
         let mut new_board = self.board.clone();
@@ -62,56 +108,118 @@ impl BitBoardPosition {
         new_board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] += detailed_move.end.to_u64();
         new_board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] -= detailed_move.start.to_u64();
 
-        if detailed_move.piece.piece_type == PieceType::Pawn 
-            && detailed_move.end == self.en_passant_square {
+        if is_valid_castle_move {
+            let rook_start: Square;
+            let rook_end: Square;
+
+            match detailed_move.end {
+                Square::C1 => {
+                    rook_start = Square::A1;
+                    rook_end = Square::D1;
+                    self.white_queen_side_castle = false;
+                },
+                Square::G1 => {
+                    rook_start = Square::H1;
+                    rook_end = Square::F1;
+                    self.white_king_side_castle = false;
+                },
+                Square::C8 => {
+                    rook_start = Square::A8;
+                    rook_end = Square::D8;
+                    self.black_queen_side_castle = false;
+                },
+                Square::G8 => {
+                    rook_start = Square::H8;
+                    rook_end = Square::F8;
+                    self.black_king_side_castle = false;
+                },
+                _ => panic!("There's bug, castle move already validated, but is invalid")
+            }
+
+            new_board[PieceType::Rook as usize + (6 * self.to_play as usize)] += rook_end.to_u64();
+            new_board[PieceType::Rook as usize + (6 * self.to_play as usize)] -= rook_start.to_u64();
+
+            self.en_passant_square = Square::Invalid;
+        } else {
+            if let Err(err) = self.validate_move(&detailed_move, attack_sets) {
+                println!("{}\n\n", err);
+                return Err(self);
+            }
+
+            if detailed_move.piece.piece_type == PieceType::Pawn 
+                && detailed_move.end == self.en_passant_square {
+                    match self.to_play {
+                        Player::White => {
+                            let mut layer = new_board[PieceType::Pawn as usize + 6];
+                            layer = layer - (layer & self.en_passant_square.to_u64() >> 8);
+                            new_board[PieceType::Pawn as usize + 6] = layer;
+                        },
+                        Player::Black => {
+                            let mut layer = new_board[PieceType::Pawn as usize];
+                            layer = layer - (layer & self.en_passant_square.to_u64() << 8);
+                            new_board[PieceType::Pawn as usize] = layer;
+                        },
+                    }
+            }
+
+            for piece_type_determinant in 0..6 {
+                let mut layer = new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
+
+                layer = layer - (layer & detailed_move.end.to_u64());
+
+                if (layer & detailed_move.end.to_u64()) != 0 {
+                    println!("Piece captured!");
+                }
+
+                new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
+            }
+
+            if calculations::is_king_in_check(&new_board, self.to_play, attack_sets) {
+                println!("King can't be in check");
+                return Err(self)
+            }
+            if detailed_move.piece.piece_type == PieceType::Pawn {
                 match self.to_play {
                     Player::White => {
-                        let mut layer = new_board[PieceType::Pawn as usize + 6];
-                        layer = layer - (layer & self.en_passant_square.to_u64() >> 8);
-                        new_board[PieceType::Pawn as usize + 6] = layer;
+                        if detailed_move.start.to_u64() & Rank::Second.to_u64() != 0
+                            && detailed_move.end.to_u64() & Rank::Fourth.to_u64() != 0 {
+                                self.en_passant_square = Square::from_u64(detailed_move.start.to_u64() << 8);
+                            }
                     },
                     Player::Black => {
-                        let mut layer = new_board[PieceType::Pawn as usize];
-                        layer = layer - (layer & self.en_passant_square.to_u64() << 8);
-                        new_board[PieceType::Pawn as usize] = layer;
+                        if detailed_move.start.to_u64() & Rank::Seventh.to_u64() != 0
+                            && detailed_move.end.to_u64() & Rank::Fifth.to_u64() != 0 {
+                                self.en_passant_square = Square::from_u64(detailed_move.start.to_u64() >> 8);
+                            }
                     },
                 }
-        }
-
-        for piece_type_determinant in 0..6 {
-            let mut layer = new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
-
-            layer = layer - (layer & detailed_move.end.to_u64());
-
-            if (layer & detailed_move.end.to_u64()) != 0 {
-                println!("Piece captured!");
+            } else {
+                self.en_passant_square = Square::Invalid;
             }
 
-            new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
-        }
-
-        if calculations::is_king_in_check(new_board, self.to_play, attack_sets) {
-            println!("King can't be in check");
-            return Err(self)
-        }
-
-        if detailed_move.piece.piece_type == PieceType::Pawn {
-            match self.to_play {
-                Player::White => {
-                    if detailed_move.start.to_u64() & Rank::Second.to_u64() != 0
-                        && detailed_move.end.to_u64() & Rank::Fourth.to_u64() != 0 {
-                            self.en_passant_square = Square::from_u64(detailed_move.start.to_u64() << 8);
-                        }
+            match detailed_move.start {
+                Square::E1 => {
+                    self.white_king_side_castle = false;
+                    self.white_queen_side_castle = false;
                 },
-                Player::Black => {
-                    if detailed_move.start.to_u64() & Rank::Seventh.to_u64() != 0
-                        && detailed_move.end.to_u64() & Rank::Fifth.to_u64() != 0 {
-                            self.en_passant_square = Square::from_u64(detailed_move.start.to_u64() >> 8);
-                        }
+                Square::E8 => {
+                    self.black_king_side_castle = false;
+                    self.black_queen_side_castle = false;
                 },
+                Square::A1 => {
+                    self.white_queen_side_castle = false;
+                },
+                Square::H1 => {
+                    self.white_king_side_castle = false;
+                },
+                Square::A8 => {
+                    self.black_queen_side_castle = false;
+                },
+                Square::H8 => {
+                    self.black_king_side_castle = false;
+                },
+                _ => ()
             }
-        } else {
-            self.en_passant_square = Square::Invalid;
         }
 
         self.board = new_board;
@@ -144,15 +252,15 @@ impl BitBoardPosition {
                     if tentative_move.end == self.en_passant_square {
                         return Ok(());
                     }
-                    if intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play.opponent()) {
+                    if intercect_with_player_pieces(tentative_move.end.to_u64(), &self.board, self.to_play.opponent()) {
                         return Ok(());
                     }
                     return Err("Diagonal pawn moves need to be a capture".to_string())
                 }
                 
                 if (calculations::pawn_moves(start, owner) & end) != 0 {
-                    if !intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play.opponent()) 
-                        && !intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play) {
+                    if !intercect_with_player_pieces(tentative_move.end.to_u64(), &self.board, self.to_play.opponent()) 
+                        && !intercect_with_player_pieces(tentative_move.end.to_u64(), &self.board, self.to_play) {
                         return Ok(());
                     }
                     return Err("Pawn cannot attack forward".to_string())
@@ -171,11 +279,11 @@ impl BitBoardPosition {
                         let next_square = &attack_sets.orthogonals[start as usize][direction_index][next_square_index];
                         if next_square == &Square::Invalid { break; }
 
-                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play) { break; }
+                        if intercect_with_player_pieces(next_square.to_u64(), &self.board, self.to_play) { break; }
 
                         possible_moves = possible_moves | next_square.to_u64();
 
-                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play.opponent()) { break; }
+                        if intercect_with_player_pieces(next_square.to_u64(), &self.board, self.to_play.opponent()) { break; }
                     }
                 }
 
@@ -196,11 +304,11 @@ impl BitBoardPosition {
                         let next_square = &attack_sets.diagonals[start as usize][direction_index][next_square_index];
                         if next_square == &Square::Invalid { break; }
 
-                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play) { break; }
+                        if intercect_with_player_pieces(next_square.to_u64(), &self.board, self.to_play) { break; }
 
                         possible_moves = possible_moves | next_square.to_u64();
 
-                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play.opponent()) { break; }
+                        if intercect_with_player_pieces(next_square.to_u64(), &self.board, self.to_play.opponent()) { break; }
                     }
                 }
 
@@ -356,55 +464,70 @@ pub mod calculations {
 
     use super::{ File, Player, BitBoardPosition };
 
-    pub fn is_king_in_check(board: [u64; 12], player: Player, attack_sets: &precalculations::PreComputedAttackSets) -> bool {
-        let king_position = board[PieceType::King as usize + (6 * player as usize)];
-
-        if knight_attacks(king_position) & board[PieceType::Knight as usize + (6 * player.opponent() as usize)] != 0 {
+    pub fn is_square_in_check(square: Square, board: &[u64; 12], player: Player, attack_sets: &precalculations::PreComputedAttackSets) -> bool {
+        if knight_attacks(square.to_u64()) & board[PieceType::Knight as usize + (6 * player.opponent() as usize)] != 0 {
+            println!("1");
             return true
         } 
 
-        if king_moves(king_position) & board[PieceType::King as usize + (6 * player.opponent() as usize)] != 0 {
+        if king_moves(square.to_u64()) & board[PieceType::King as usize + (6 * player.opponent() as usize)] != 0 {
+            println!("2");
             return true
         } 
 
-        if pawn_attacks(king_position, player) & board[PieceType::Pawn as usize + (6 * player.opponent() as usize)] != 0 {
+        if pawn_attacks(square.to_u64(), player) & board[PieceType::Pawn as usize + (6 * player.opponent() as usize)] != 0 {
+            println!("3");
             return true
         } 
 
         for direction_index in 0..4 {
-            for next_square_index in (0..7).rev() {
-                let next_square = &attack_sets.orthogonals[Square::from_u64(king_position) as usize][direction_index][next_square_index];
+            for next_square_index in 0..7 {
+                let next_square = &attack_sets.orthogonals[Square::from_u64(square.to_u64()) as usize][direction_index][next_square_index];
 
-                if next_square == &Square::Invalid { continue; }
+                if next_square == &Square::Invalid { break; }
 
                 if next_square.to_u64() & (board[PieceType::Rook as usize + (6 * player.opponent() as usize)] 
                 | board[PieceType::Queen as usize + (6 * player.opponent() as usize)]) !=0 {
+                    println!("4");
                     return true;
                 }
-                break;
+
+                if !is_empty(next_square.to_u64(), board) { break; }
             }
         }
 
         for direction_index in 0..4 {
-            for next_square_index in (0..7).rev() {
-                let next_square = &attack_sets.diagonals[Square::from_u64(king_position) as usize][direction_index][next_square_index];
+            for next_square_index in 0..7 {
+                let next_square = &attack_sets.diagonals[Square::from_u64(square.to_u64()) as usize][direction_index][next_square_index];
 
-                if next_square == &Square::Invalid { continue; }
+                if next_square == &Square::Invalid { break; }
 
                 if next_square.to_u64() & (board[PieceType::Bishop as usize + (6 * player.opponent() as usize)] 
                 | board[PieceType::Queen as usize + (6 * player.opponent() as usize)]) !=0 {
+                    println!("5");
                     return true;
                 }
-                break;
+
+                if !is_empty(next_square.to_u64(), board) { break; }
             }
         }
 
         false
     }
 
-    pub fn intercect_with_player_pieces(map: u64, position: &BitBoardPosition, player: Player) -> bool {
+    pub fn is_king_in_check(board: &[u64; 12], player: Player, attack_sets: &precalculations::PreComputedAttackSets) -> bool {
+        let king_position = board[PieceType::King as usize + (6 * player as usize)];
+        is_square_in_check(Square::from_u64(king_position), board, player, attack_sets)
+    }
+
+    pub fn is_empty(map: u64, board: &[u64; 12]) -> bool {
+        !(intercect_with_player_pieces(map, board, Player::White)
+          || intercect_with_player_pieces(map, board, Player::Black))
+    }
+
+    pub fn intercect_with_player_pieces(map: u64, board: &[u64; 12], player: Player) -> bool {
         for piece_type_determinant in 0..6 {
-            if (position.board[piece_type_determinant + (6 * player as usize)] & map) != 0 {
+            if (board[piece_type_determinant + (6 * player as usize)] & map) != 0 {
                 return true;
             }
         }            
