@@ -69,8 +69,8 @@ impl BitBoardPosition {
             new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
         }
 
-        if calculations::is_king_in_check(new_board, self.to_play) {
-            println!("King can't enter check");
+        if calculations::is_king_in_check(new_board, self.to_play, attack_sets) {
+            println!("King can't be in check");
             return Err(self)
         }
 
@@ -299,11 +299,11 @@ impl Rank {
 
 pub mod calculations {
 
-    use crate::definitions::{Rank, PieceType};
+    use crate::definitions::{Rank, PieceType, Square};
 
     use super::{ File, Player, BitBoardPosition };
 
-    pub fn is_king_in_check(board: [u64; 12], player: Player) -> bool {
+    pub fn is_king_in_check(board: [u64; 12], player: Player, attack_sets: &precalculations::PreComputedAttackSets) -> bool {
         let king_position = board[PieceType::King as usize + (6 * player as usize)];
 
         if knight_attacks(king_position) & board[PieceType::Knight as usize + (6 * player.opponent() as usize)] != 0 {
@@ -317,6 +317,34 @@ pub mod calculations {
         if pawn_attacks(king_position, player) & board[PieceType::Pawn as usize + (6 * player.opponent() as usize)] != 0 {
             return true
         } 
+
+        for direction_index in 0..4 {
+            for next_square_index in (0..7).rev() {
+                let next_square = &attack_sets.orthogonals[Square::from_u64(king_position) as usize][direction_index][next_square_index];
+
+                if next_square == &Square::Invalid { continue; }
+
+                if next_square.to_u64() & (board[PieceType::Rook as usize + (6 * player.opponent() as usize)] 
+                | board[PieceType::Queen as usize + (6 * player.opponent() as usize)]) !=0 {
+                    return true;
+                }
+                break;
+            }
+        }
+
+        for direction_index in 0..4 {
+            for next_square_index in (0..7).rev() {
+                let next_square = &attack_sets.diagonals[Square::from_u64(king_position) as usize][direction_index][next_square_index];
+
+                if next_square == &Square::Invalid { continue; }
+
+                if next_square.to_u64() & (board[PieceType::Bishop as usize + (6 * player.opponent() as usize)] 
+                | board[PieceType::Queen as usize + (6 * player.opponent() as usize)]) !=0 {
+                    return true;
+                }
+                break;
+            }
+        }
 
         false
     }
