@@ -15,6 +15,7 @@ use super::{
     }
 };
 
+
 impl Square {
     pub fn to_u64(&self) -> u64 {
         2u64.pow(self.to_owned() as u32)
@@ -29,7 +30,7 @@ impl Square {
 }
 
 impl BitBoardPosition {
-    pub fn play_move(mut self, tentative_move: (Square, Square)) -> Result<Self, Self> {
+    pub fn play_move(mut self, tentative_move: (Square, Square), attack_sets: &calculations::precalculations::PreComputedAttackSets) -> Result<Self, Self> {
         let tentative_move_result = Move::from_bitboard(&self, tentative_move);
 
         if let Err(err) = tentative_move_result {
@@ -39,7 +40,7 @@ impl BitBoardPosition {
 
         let detailed_move = tentative_move_result.unwrap();
 
-        if let Err(err) = self.validate_move(&detailed_move) {
+        if let Err(err) = self.validate_move(&detailed_move, attack_sets) {
             println!("{}\n\n", err);
             return Err(self);
         }
@@ -64,7 +65,7 @@ impl BitBoardPosition {
         Ok(self)
     }
 
-    fn validate_move(&self, tentative_move: &Move) -> Result<(), String> {
+    fn validate_move(&self, tentative_move: &Move, attack_sets: &calculations::precalculations::PreComputedAttackSets) -> Result<(), String> {
         if self.to_play != tentative_move.piece.owner { return Err("Player doesn't own this piece".to_string()); }
 
         for piece_type_determinant in 0..6 {
@@ -100,6 +101,66 @@ impl BitBoardPosition {
                 }
 
                 Err("Illegal pawn move".to_string())
+            },
+            PieceType::Rook => {
+                let start = tentative_move.start;
+                let end = tentative_move.end;
+
+                let mut possible_moves = 0;
+
+                for direction_index in 0..4 {
+                    for next_square_index in 0..7 {
+                        let next_square = &attack_sets.orthogonals[start as usize][direction_index][next_square_index];
+                        if next_square == &Square::Invalid { break; }
+
+                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play) { break; }
+
+                        possible_moves = possible_moves | next_square.to_u64();
+
+                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play.opponent()) { break; }
+                    }
+                }
+
+                if possible_moves & end.to_u64() != 0 {
+                    Ok(())
+                } else {
+                    Err("Illegal rook move".to_string())
+                }
+            },
+            PieceType::Bishop => {
+                let start = tentative_move.start;
+                let end = tentative_move.end;
+
+                let mut possible_moves = 0;
+
+                for direction_index in 0..4 {
+                    for next_square_index in 0..7 {
+                        let next_square = &attack_sets.diagonals[start as usize][direction_index][next_square_index];
+                        if next_square == &Square::Invalid { break; }
+
+                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play) { break; }
+
+                        possible_moves = possible_moves | next_square.to_u64();
+
+                        if intercect_with_player_pieces(next_square.to_u64(), self, self.to_play.opponent()) { break; }
+                    }
+                }
+
+                if possible_moves & end.to_u64() != 0 {
+                    return Ok(())
+                }  
+                Err("Illegal bishop move".to_string())
+            },
+            PieceType::Queen => {
+                let mut rook_move = tentative_move.clone();
+                let mut bishop_move = tentative_move.clone();
+                rook_move.piece.piece_type = PieceType::Rook;
+                bishop_move.piece.piece_type = PieceType::Bishop;
+                if self.validate_move(&rook_move, attack_sets).is_ok() 
+                    || self.validate_move(&bishop_move, attack_sets).is_ok() {
+                    return Ok(())
+                }
+                Err("Illegal queen move".to_string())
             }
             _ => Err("Not implemented".to_string())
         }

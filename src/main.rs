@@ -19,20 +19,11 @@ fn main() {
     use std::env;
     env::set_var("RUST_BACKTRACE", "1");
 
-    let attack_sets = precalculations::build_piece_attack_set();
-
-    println!("{}", bit_board::BitBoard(attack_sets.attacks(Square::H4, PieceType::Bishop)).to_string());
-    println!("{}", bit_board::BitBoard(attack_sets.blockers(Square::H4, PieceType::Bishop)).to_string());
-
-    println!("{}", bit_board::BitBoard(attack_sets.attacks(Square::F3, PieceType::Queen)).to_string());
-    println!("{}", bit_board::BitBoard(attack_sets.blockers(Square::F3, PieceType::Queen)).to_string());
-
-    println!("{}", bit_board::BitBoard(attack_sets.attacks(Square::D2, PieceType::Rook)).to_string());
-    println!("{}", bit_board::BitBoard(attack_sets.blockers(Square::D2, PieceType::Rook)).to_string());
-
+    start_game();
 }
 
 fn start_game() {
+    let attack_sets = precalculations::build_piece_attack_set();
     let mut position = BitBoardPosition::from_position(&INITIAL_POSITION);
     use std::io::{stdin, stdout, Write};
     loop {
@@ -75,7 +66,7 @@ fn start_game() {
             continue;
         }
 
-        position = match position.play_move(move_instruction) {
+        position = match position.play_move(move_instruction, &attack_sets) {
             Ok(_position) => _position,
             Err(_position) => { 
                 println!("Illegal Move");

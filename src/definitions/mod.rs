@@ -211,6 +211,7 @@ impl ToString for SimplePosition {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Move {
     pub start: Square,
     pub end: Square,
