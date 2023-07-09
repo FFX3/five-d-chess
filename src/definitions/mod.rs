@@ -10,6 +10,7 @@ pub static INITIAL_POSITION: SimplePosition = SimplePosition {
     white_queen_side_castle: true,
     black_king_side_castle: true,
     black_queen_side_castle: true,
+    promotion_square: Square::Invalid,
     board: [
         Occupant::Piece(Piece { piece_type: PieceType::Rook, owner: Player::White }),
         Occupant::Piece(Piece { piece_type: PieceType::Knight, owner: Player::White }),
@@ -194,6 +195,7 @@ pub struct SimplePosition {
     pub white_queen_side_castle: bool,
     pub black_king_side_castle: bool,
     pub black_queen_side_castle: bool,
+    pub promotion_square: Square,
 }
 
 impl ToString for SimplePosition {

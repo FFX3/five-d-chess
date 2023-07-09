@@ -38,11 +38,14 @@ pub struct BitBoardPosition {
     white_queen_side_castle: bool,
     black_king_side_castle: bool,
     black_queen_side_castle: bool,
+    pub promotion_square: Square,
 }
 
 
 impl BitBoardPosition {
     pub fn play_move(mut self, tentative_move: (Square, Square), attack_sets: &calculations::precalculations::PreComputedAttackSets) -> Result<Self, Self> {
+        if self.promotion_square != Square::Invalid { return Err(self); }
+
         let tentative_move_result = Move::from_bitboard(&self, tentative_move);
 
         if let Err(err) = tentative_move_result {
@@ -223,8 +226,14 @@ impl BitBoardPosition {
         }
 
         self.board = new_board;
-        self.to_play = self.to_play.opponent();
 
+        if detailed_move.piece.piece_type == PieceType::Pawn 
+            && detailed_move.end.to_u64() & (Rank::First.to_u64() | Rank::Eight.to_u64()) != 0 {
+                self.promotion_square = detailed_move.end;
+                return Ok(self)
+            }
+
+        self.to_play = self.to_play.opponent();
         Ok(self)
     }
 
@@ -336,6 +345,18 @@ impl BitBoardPosition {
         }
     }
 
+    pub fn promote(mut self, piece: PieceType) -> Result<Self, Self> {
+        if self.promotion_square == Square::Invalid { return Err(self); }
+
+        self.board[PieceType::Pawn as usize + (6 * self.to_play as usize)] -= self.promotion_square.to_u64();
+        self.board[piece as usize + (6 * self.to_play as usize)] += self.promotion_square.to_u64();
+
+        self.to_play = self.to_play.opponent();
+        self.promotion_square = Square::Invalid;
+
+        Ok(self)
+    }
+
     pub fn from_position(position: &SimplePosition) -> Self {
         const PIECE_TYPE_COUNT: usize = 6;
 
@@ -359,6 +380,7 @@ impl BitBoardPosition {
             white_queen_side_castle: position.black_queen_side_castle,
             black_king_side_castle: position.white_king_side_castle,
             black_queen_side_castle: position.black_queen_side_castle,
+            promotion_square: position.promotion_square,
             board,
         }
     }
@@ -387,6 +409,7 @@ impl BitBoardPosition {
             white_queen_side_castle: self.black_queen_side_castle,
             black_king_side_castle: self.white_king_side_castle,
             black_queen_side_castle: self.black_queen_side_castle,
+            promotion_square: self.promotion_square,
             board,
         }
     }
@@ -462,21 +485,18 @@ pub mod calculations {
 
     use crate::definitions::{Rank, PieceType, Square};
 
-    use super::{ File, Player, BitBoardPosition };
+    use super::{ File, Player, };
 
     pub fn is_square_in_check(square: Square, board: &[u64; 12], player: Player, attack_sets: &precalculations::PreComputedAttackSets) -> bool {
         if knight_attacks(square.to_u64()) & board[PieceType::Knight as usize + (6 * player.opponent() as usize)] != 0 {
-            println!("1");
             return true
         } 
 
         if king_moves(square.to_u64()) & board[PieceType::King as usize + (6 * player.opponent() as usize)] != 0 {
-            println!("2");
             return true
         } 
 
         if pawn_attacks(square.to_u64(), player) & board[PieceType::Pawn as usize + (6 * player.opponent() as usize)] != 0 {
-            println!("3");
             return true
         } 
 
@@ -488,7 +508,6 @@ pub mod calculations {
 
                 if next_square.to_u64() & (board[PieceType::Rook as usize + (6 * player.opponent() as usize)] 
                 | board[PieceType::Queen as usize + (6 * player.opponent() as usize)]) !=0 {
-                    println!("4");
                     return true;
                 }
 
@@ -504,7 +523,6 @@ pub mod calculations {
 
                 if next_square.to_u64() & (board[PieceType::Bishop as usize + (6 * player.opponent() as usize)] 
                 | board[PieceType::Queen as usize + (6 * player.opponent() as usize)]) !=0 {
-                    println!("5");
                     return true;
                 }
 
