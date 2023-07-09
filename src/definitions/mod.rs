@@ -5,6 +5,11 @@ use num_enum::TryFromPrimitive;
 
 pub static INITIAL_POSITION: SimplePosition = SimplePosition {
     to_play: Player::White,
+    en_passant_square: Square::Invalid,
+    white_king_side_castle: true,
+    white_queen_side_castle: true,
+    black_king_side_castle: true,
+    black_queen_side_castle: true,
     board: [
         Occupant::Piece(Piece { piece_type: PieceType::Rook, owner: Player::White }),
         Occupant::Piece(Piece { piece_type: PieceType::Knight, owner: Player::White }),
@@ -184,6 +189,11 @@ impl Player {
 pub struct SimplePosition {
     pub board: [Occupant; 64],
     pub to_play: Player,
+    pub en_passant_square: Square,
+    pub white_king_side_castle: bool,
+    pub white_queen_side_castle: bool,
+    pub black_king_side_castle: bool,
+    pub black_queen_side_castle: bool,
 }
 
 impl ToString for SimplePosition {

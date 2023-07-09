@@ -33,6 +33,11 @@ impl Square {
 pub struct BitBoardPosition {
     to_play: Player,
     board: [u64; 12], //index with piece type enum
+    en_passant_square: Square,
+    white_king_side_castle: bool,
+    white_queen_side_castle: bool,
+    black_king_side_castle: bool,
+    black_queen_side_castle: bool,
 }
 
 
@@ -57,6 +62,22 @@ impl BitBoardPosition {
         new_board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] += detailed_move.end.to_u64();
         new_board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] -= detailed_move.start.to_u64();
 
+        if detailed_move.piece.piece_type == PieceType::Pawn 
+            && detailed_move.end == self.en_passant_square {
+                match self.to_play {
+                    Player::White => {
+                        let mut layer = new_board[PieceType::Pawn as usize + 6];
+                        layer = layer - (layer & self.en_passant_square.to_u64() >> 8);
+                        new_board[PieceType::Pawn as usize + 6] = layer;
+                    },
+                    Player::Black => {
+                        let mut layer = new_board[PieceType::Pawn as usize];
+                        layer = layer - (layer & self.en_passant_square.to_u64() << 8);
+                        new_board[PieceType::Pawn as usize] = layer;
+                    },
+                }
+        }
+
         for piece_type_determinant in 0..6 {
             let mut layer = new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
 
@@ -72,6 +93,25 @@ impl BitBoardPosition {
         if calculations::is_king_in_check(new_board, self.to_play, attack_sets) {
             println!("King can't be in check");
             return Err(self)
+        }
+
+        if detailed_move.piece.piece_type == PieceType::Pawn {
+            match self.to_play {
+                Player::White => {
+                    if detailed_move.start.to_u64() & Rank::Second.to_u64() != 0
+                        && detailed_move.end.to_u64() & Rank::Fourth.to_u64() != 0 {
+                            self.en_passant_square = Square::from_u64(detailed_move.start.to_u64() << 8);
+                        }
+                },
+                Player::Black => {
+                    if detailed_move.start.to_u64() & Rank::Seventh.to_u64() != 0
+                        && detailed_move.end.to_u64() & Rank::Fifth.to_u64() != 0 {
+                            self.en_passant_square = Square::from_u64(detailed_move.start.to_u64() >> 8);
+                        }
+                },
+            }
+        } else {
+            self.en_passant_square = Square::Invalid;
         }
 
         self.board = new_board;
@@ -101,6 +141,9 @@ impl BitBoardPosition {
                 let owner = tentative_move.piece.owner;
 
                 if (calculations::pawn_attacks(start, owner) & end) != 0 {
+                    if tentative_move.end == self.en_passant_square {
+                        return Ok(());
+                    }
                     if intercect_with_player_pieces(tentative_move.end.to_u64(), self, self.to_play.opponent()) {
                         return Ok(());
                     }
@@ -203,6 +246,11 @@ impl BitBoardPosition {
 
         Self {
             to_play: position.to_play, 
+            en_passant_square: position.en_passant_square,
+            white_king_side_castle: position.white_king_side_castle,
+            white_queen_side_castle: position.black_queen_side_castle,
+            black_king_side_castle: position.white_king_side_castle,
+            black_queen_side_castle: position.black_queen_side_castle,
             board,
         }
     }
@@ -226,6 +274,11 @@ impl BitBoardPosition {
 
         SimplePosition {
             to_play: self.to_play,
+            en_passant_square: self.en_passant_square,
+            white_king_side_castle: self.white_king_side_castle,
+            white_queen_side_castle: self.black_queen_side_castle,
+            black_king_side_castle: self.white_king_side_castle,
+            black_queen_side_castle: self.black_queen_side_castle,
             board,
         }
     }
