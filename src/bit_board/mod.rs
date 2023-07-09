@@ -29,6 +29,13 @@ impl Square {
     }
 }
 
+#[derive(Debug)]
+pub struct BitBoardPosition {
+    to_play: Player,
+    board: [u64; 12], //index with piece type enum
+}
+
+
 impl BitBoardPosition {
     pub fn play_move(mut self, tentative_move: (Square, Square), attack_sets: &calculations::precalculations::PreComputedAttackSets) -> Result<Self, Self> {
         let tentative_move_result = Move::from_bitboard(&self, tentative_move);
@@ -45,11 +52,13 @@ impl BitBoardPosition {
             return Err(self);
         }
 
-        self.board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] += detailed_move.end.to_u64();
-        self.board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] -= detailed_move.start.to_u64();
+        let mut new_board = self.board.clone();
+
+        new_board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] += detailed_move.end.to_u64();
+        new_board[detailed_move.piece.piece_type as usize + (6 * self.to_play as usize)] -= detailed_move.start.to_u64();
 
         for piece_type_determinant in 0..6 {
-            let mut layer = self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
+            let mut layer = new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)];
 
             layer = layer - (layer & detailed_move.end.to_u64());
 
@@ -57,9 +66,15 @@ impl BitBoardPosition {
                 println!("Piece captured!");
             }
 
-            self.board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
+            new_board[piece_type_determinant + (6 * self.to_play.opponent() as usize)] = layer;
         }
 
+        if calculations::is_king_in_check(new_board, self.to_play) {
+            println!("King can't enter check");
+            return Err(self)
+        }
+
+        self.board = new_board;
         self.to_play = self.to_play.opponent();
 
         Ok(self)
@@ -161,8 +176,12 @@ impl BitBoardPosition {
                     return Ok(())
                 }
                 Err("Illegal queen move".to_string())
+            },
+            PieceType::King => {
+                let intersection = calculations::king_moves(tentative_move.start.to_u64()) & tentative_move.end.to_u64();
+                if intersection != 0 { return Ok(()); }
+                Err("Illegal king move".to_string())
             }
-            _ => Err("Not implemented".to_string())
         }
     }
 
@@ -242,12 +261,6 @@ impl BitBoard {
     }
 }
 
-#[derive(Debug)]
-pub struct BitBoardPosition {
-    to_play: Player,
-    board: [u64; 12], //indexes with piece type enum
-}
-
 impl Move {
     fn from_bitboard(position: &BitBoardPosition, squares: (Square, Square)) -> Result<Self, &str> {
 
@@ -279,16 +292,34 @@ impl File {
 impl Rank {
     fn to_u64(&self) -> u64 {
         let descriminant = self.to_owned() as u32;
-        (0..8).into_iter().fold(0, |acc, colum_number| -> u64 { acc + 2u64.pow((colum_number) + descriminant) }) << (descriminant * 7) //TODO: why 7? it works?
+        (0..8).into_iter().fold(0, |acc, colum_number| -> u64 { acc + 2u64.pow((colum_number) + descriminant) }) << (descriminant * 7)
     }
 }
 
 
 pub mod calculations {
 
-    use crate::definitions::Rank;
+    use crate::definitions::{Rank, PieceType};
 
     use super::{ File, Player, BitBoardPosition };
+
+    pub fn is_king_in_check(board: [u64; 12], player: Player) -> bool {
+        let king_position = board[PieceType::King as usize + (6 * player as usize)];
+
+        if knight_attacks(king_position) & board[PieceType::Knight as usize + (6 * player.opponent() as usize)] != 0 {
+            return true
+        } 
+
+        if king_moves(king_position) & board[PieceType::King as usize + (6 * player.opponent() as usize)] != 0 {
+            return true
+        } 
+
+        if pawn_attacks(king_position, player) & board[PieceType::Pawn as usize + (6 * player.opponent() as usize)] != 0 {
+            return true
+        } 
+
+        false
+    }
 
     pub fn intercect_with_player_pieces(map: u64, position: &BitBoardPosition, player: Player) -> bool {
         for piece_type_determinant in 0..6 {
@@ -317,6 +348,17 @@ pub mod calculations {
         } 
         (positions >> 9) & (u64::MAX ^ File::H.to_u64())
         | (positions >> 7) & (u64::MAX ^ File::A.to_u64())
+    }
+
+    pub fn king_moves(positions: u64) -> u64 {
+        (positions << 7)
+        | (positions << 8)
+        | (positions << 9)
+        | (positions << 1)
+        | (positions >> 7)
+        | (positions >> 8)
+        | (positions >> 9)
+        | (positions >> 1)
     }
 
     pub fn pawn_moves(positions: u64, player: Player) -> u64 {
