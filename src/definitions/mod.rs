@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::result::Result;
 
+use deku::prelude::*;
 use num_enum::TryFromPrimitive;
 
 pub static INITIAL_POSITION: SimplePosition = SimplePosition {
@@ -59,10 +60,11 @@ pub static INITIAL_POSITION: SimplePosition = SimplePosition {
         ]
 };
 
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone, TryFromPrimitive)]
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone, TryFromPrimitive, DekuRead, DekuWrite)]
+#[deku(type = "u8")]
 #[repr(u8)]
 pub enum Square {
-   A1,B1,C1,D1,E1,F1,G1,H1,
+   A1 = 0,B1,C1,D1,E1,F1,G1,H1,
    A2,B2,C2,D2,E2,F2,G2,H2,
    A3,B3,C3,D3,E3,F3,G3,H3,
    A4,B4,C4,D4,E4,F4,G4,H4,
@@ -171,9 +173,10 @@ impl Occupant {
 }
 
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, DekuRead, DekuWrite)]
+#[deku(type = "u8")]
 pub enum Player {
-    White,
+    White = 0,
     Black,
 }
 

@@ -1,5 +1,6 @@
 use num_enum::TryFromPrimitive;
 use self::calculations::{intercect_with_player_pieces, is_square_in_check, is_empty};
+use deku::prelude::*;
 
 use super::{
     Square, 
@@ -29,9 +30,9 @@ impl Square {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, DekuRead, DekuWrite, Clone)]
 pub struct BitBoardPosition {
-    to_play: Player,
+    pub to_play: Player,
     board: [u64; 12], //index with piece type enum
     en_passant_square: Square,
     white_king_side_castle: bool,
@@ -600,9 +601,11 @@ pub mod calculations {
     pub mod precalculations {
 
         use num_enum::TryFromPrimitive;
+        use deku::prelude::*;
 
-        use crate::{bit_board::{ PieceType, Rank, File, BitBoard }, definitions::Square};
+        use crate::{bit_board::{ PieceType, Rank, File }, definitions::Square};
 
+        #[derive(DekuRead, DekuWrite)]
         pub struct PreComputedAttackSets {
             pub attacks: [[u64; 64]; 3],
             pub blockers: [[u64; 64]; 3],

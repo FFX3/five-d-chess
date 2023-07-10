@@ -1,5 +1,6 @@
 mod bit_board;
 mod definitions;
+mod wasm;
 
 use std::str::FromStr;
 
@@ -26,12 +27,18 @@ fn main() {
 fn start_game() {
     let attack_sets = precalculations::build_piece_attack_set();
     let mut position = BitBoardPosition::from_position(&INITIAL_POSITION);
+    
+    let mut position_history: Vec<BitBoardPosition> = vec![];
 
     loop {
         if position.promotion_square == Square::Invalid {
             position = handle_move(position, &attack_sets);
+            if position.promotion_square == Square::Invalid {
+                position_history.push(position.clone());
+            }
         } else {
             position = handle_promotion(position);
+            position_history.push(position.clone());
         }
     }
 }
